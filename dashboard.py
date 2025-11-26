@@ -17,7 +17,7 @@ st.set_page_config(
 
 # Caminhos dos arquivos
 DATA_DIR = 'dados'
-CAMINHO_DADOS = os.path.join(DATA_DIR, 'olist_processado.csv')
+CAMINHO_DADOS = os.path.join(DATA_DIR, 'olist_lite.zip')
 CAMINHO_RELATORIO = os.path.join(DATA_DIR, 'relatorio_analise.txt')
 
 @st.cache_data
@@ -26,7 +26,7 @@ def carregar_dados():
         st.error(f"Arquivo {CAMINHO_DADOS} não encontrado. Rode o script 'atividade.py' primeiro.")
         return pd.DataFrame()
     
-    df = pd.read_csv(CAMINHO_DADOS)
+    df = pd.read_csv(CAMINHO_DADOS, compression='zip')
     
     # Garantir que colunas de data sejam datetime
     cols_data = ['data_compra', 'data_entrega', 'data_estimada']
@@ -527,4 +527,5 @@ with tab_ml:
         
         st.table(tabela_visual)
         
+
         st.success(f"💡 Insight: O grupo **{grupo_rico}** é o que traz maior receita unitária.")
