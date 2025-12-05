@@ -7,57 +7,52 @@ import json
 from urllib.request import urlopen
 
 # ==============================================================================
-# CONFIGURAÇÃO INICIAL
+# CONFIGURAÇÃO INICIAL E CARREGAMENTO
 # ==============================================================================
 st.set_page_config(
-    page_title="Dashboard Olist - Executive View",
+    page_title="Dashboard Olist - Análise de Dados",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- CONFIGURAÇÃO DE CAMINHOS ---
+# Caminhos dos arquivos
+DATA_DIR = 'dados'
+CAMINHO_DADOS = os.path.join(DATA_DIR, 'olist_lite.zip')
+CAMINHO_RELATORIO = os.path.join(DATA_DIR, 'relatorio_analise.txt')
+# --- CORREÇÃO DE CAMINHOS PARA O GITHUB ---
+# Usamos '.' para indicar a pasta atual (raiz do repositório)
 DATA_DIR = '.' 
+# Usamos o arquivo ZIP (versão leve)
 CAMINHO_DADOS = 'olist_lite.zip' 
 CAMINHO_RELATORIO = 'relatorio_analise.txt'
 
-# ==============================================================================
-# FUNÇÃO DE CARGA DE DADOS (VERSÃO BLINDADA)
-# ==============================================================================
 @st.cache_data
 def carregar_dados():
+    # Verifica se o arquivo existe
     if not os.path.exists(CAMINHO_DADOS):
-        return None
+        st.error(f"Arquivo {CAMINHO_DADOS} não encontrado. Rode o script 'atividade.py' primeiro.")
+        st.error(f"ERRO CRÍTICO: O arquivo '{CAMINHO_DADOS}' não foi encontrado no GitHub. Verifique se você fez o upload do arquivo .zip corretamente.")
+        return pd.DataFrame()
+
+    df = pd.read_csv(CAMINHO_DADOS, compression='zip')
     
+    # Garantir que colunas de data sejam datetime
+    cols_data = ['data_compra', 'data_entrega', 'data_estimada']
+    for col in cols_data:
+        df[col] = pd.to_datetime(df[col])
+        
+    return df
     try:
+        # compression='zip' permite ler o arquivo compactado diretamente
         df = pd.read_csv(CAMINHO_DADOS, compression='zip')
         
-        # 1. Limpeza de nomes de colunas (tira espaços extras)
-        df.columns = df.columns.str.strip()
-        
-        # 2. Conversão Forçada de Datas (Blinda o erro de AttributeError)
-        cols_data = ['data_compra', 'data_entrega', 'data_estimada']
-        for col in cols_data:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
-        
-        # 3. Criando colunas auxiliares APENAS se a conversão funcionou
+        # Garantir que colunas de data sejam datetime
         if 'data_compra' in df.columns:
-            # Remove linhas onde a data de compra é nula (erro de conversão)
-            df = df.dropna(subset=['data_compra'])
-            
-            df['hora_compra'] = df['data_compra'].dt.hour
-            df['dia_semana'] = df['data_compra'].dt.day_name()
-            
-            # Tradução dos dias
-            mapa_dias = {
-                'Monday': 'Segunda', 'Tuesday': 'Terça', 'Wednesday': 'Quarta', 
-                'Thursday': 'Quinta', 'Friday': 'Sexta', 'Saturday': 'Sábado', 'Sunday': 'Domingo'
-            }
-            df['dia_semana_pt'] = df['dia_semana'].map(mapa_dias)
+            df['data_compra'] = pd.to_datetime(df['data_compra'])
             
         return df
     except Exception as e:
-        st.error(f"Erro ao processar dados: {e}")
+        st.error(f"Erro ao ler o arquivo de dados: {e}")
         return pd.DataFrame()
 
 @st.cache_data
@@ -66,253 +61,470 @@ def carregar_relatorio():
         with open(CAMINHO_RELATORIO, 'r', encoding='utf-8') as f:
             return f.read()
     return "Relatório não encontrado."
+    return "Relatório técnico não encontrado."
 
 # Carrega os dados
 df = carregar_dados()
-
-# ==============================================================================
-# BARRA LATERAL (CONTROLE)
-# ==============================================================================
-st.sidebar.title("🛠️ Controle")
-
-# Botão de Emergência para Limpar Cache (Ajuda a resolver erros de atualização)
-if st.sidebar.button("🔄 Recarregar Dados (Limpar Cache)"):
-    st.cache_data.clear()
-    st.rerun()
-
-if df is not None and not df.empty:
-    st.sidebar.metric("Total de Pedidos", f"{df.shape[0]:,}".replace(',', '.'))
-    st.sidebar.metric("Faturamento Total", f"R$ {df['preco'].sum():,.2f}")
-    
-    st.sidebar.markdown("---")
-    st.sidebar.download_button(
-        "⬇️ Baixar Relatório Técnico",
-        data=carregar_relatorio(),
-        file_name='relatorio_analise.txt'
-    )
-
-st.sidebar.markdown("---")
-st.sidebar.caption("Dados: Olist E-Commerce")
-
-# Verifica se o DF carregou bem antes de tentar criar gráficos
-if df is None or df.empty:
-    st.error("⚠️ Não foi possível carregar os dados. Verifique se 'olist_lite.zip' está na pasta.")
-    st.stop()
-
-# ==============================================================================
-# ESTRUTURA DE ABAS
-# ==============================================================================
-st.title("🛒 Dashboard Estratégico de E-commerce")
-
-tab_overview, tab_p1, tab_p2, tab_p3, tab_ml = st.tabs([
-    "🔍 Visão Geral",
-    "P1: Tempo e Região",
-    "P2: Preço e Categorias",
-    "P3: Satisfação",
+@@ -88,14 +95,17 @@
     "Clusterização (ML)"
 ])
 
-# ==============================================================================
-# ABA: VISÃO GERAL
-# ==============================================================================
-with tab_overview:
-    st.markdown("### 🚀 Resumo Executivo do Negócio")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("1. Faturamento Diário")
-        # Agrupamento seguro por data
-        df['data_apenas'] = df['data_compra'].dt.date
-        df_daily = df.groupby('data_apenas')['preco'].sum().reset_index()
-        
-        fig_daily = px.line(df_daily, x='data_apenas', y='preco', title="Evolução da Receita Diária", template="plotly_white")
-        fig_daily.update_traces(line_color='#154360')
-        st.plotly_chart(fig_daily, use_container_width=True)
-        
-        st.subheader("3. Top 5 Categorias (Receita)")
-        df_top5_rev = df.groupby('categoria')['preco'].sum().nlargest(5).reset_index()
-        fig_top5 = px.bar(df_top5_rev, x='preco', y='categoria', orientation='h', title="Maiores Receitas por Categoria", text_auto='.2s', template="plotly_white")
-        fig_top5.update_traces(marker_color='#2E86C1')
-        st.plotly_chart(fig_top5, use_container_width=True)
-
-    with col2:
-        st.subheader("2. Pedidos por Região")
-        df_reg = df['regiao'].value_counts().reset_index()
-        df_reg.columns = ['Região', 'Pedidos']
-        fig_pie = px.donut(df_reg, names='Região', values='Pedidos', title="Share de Pedidos por Região", hole=0.4, template="plotly_white")
-        st.plotly_chart(fig_pie, use_container_width=True)
-        
-        st.subheader("4. Funil de Satisfação")
-        df_score = df['review_score'].value_counts().reset_index().sort_values('review_score')
-        fig_score = px.bar(df_score, x='review_score', y='count', title="Distribuição Geral de Notas", color='review_score', color_continuous_scale='RdYlGn', template="plotly_white")
-        st.plotly_chart(fig_score, use_container_width=True)
+# Se o dataframe estiver vazio, paramos por aqui para não dar erro nos gráficos
+if df.empty:
+    st.stop()
 
 # ==============================================================================
-# ABA P1: TEMPO E REGIÃO
+# ABA 1: PERGUNTA 1 (Tempo e Região) - VERSÃO DE ELITE
+# ABA 1: PERGUNTA 1 (Tempo e Região)
 # ==============================================================================
 with tab_p1:
-    st.markdown("### 📊 P1: Análise Temporal e Geográfica")
-    
-    col_kpi, col_area = st.columns([1, 2])
+    st.markdown("### 📊 P1: Monitoramento Temporal e Geográfico")
+
+    # --- PREPARAÇÃO DO MAPA (GEOJSON) ---
+    # Função interna para pegar o desenho do Brasil
+    @st.cache_data
+    def carregar_mapa_brasil():
+        url = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson"
+@@ -113,8 +123,7 @@
     with col_kpi:
+        st.subheader("⏱️ Eficiência Logística")
+
+        # 1. GAUGE CHART (Velocímetro)
+        # Mostra o tempo médio atual em relação a metas aceitáveis
+        # GAUGE CHART (Velocímetro)
+        tempo_medio = df['tempo_total'].mean()
+
         fig_gauge = go.Figure(go.Indicator(
-            mode="gauge+number", value=df['tempo_total'].mean(),
-            title={'text': "Tempo Médio (Dias)"},
-            gauge={'axis': {'range': [0, 30]}, 'bar': {'color': "#154360"},
-                   'steps': [{'range': [0, 10], 'color': "#2ECC71"}, {'range': [10, 30], 'color': "#E74C3C"}]}
+@@ -124,14 +133,14 @@
+            domain = {'x': [0, 1], 'y': [0, 1]},
+            gauge = {
+                'axis': {'range': [0, 30], 'tickwidth': 1, 'tickcolor': "#17202A"},
+                'bar': {'color': "#154360"}, # Azul Marinho
+                'bar': {'color': "#154360"},
+                'bgcolor': "white",
+                'borderwidth': 2,
+                'bordercolor': "gray",
+                'steps': [
+                    {'range': [0, 10], 'color': "#2ECC71"}, # Verde (Ótimo)
+                    {'range': [10, 18], 'color': "#F1C40F"}, # Amarelo (Atenção)
+                    {'range': [18, 30], 'color': "#E74C3C"}  # Vermelho (Crítico)
+                    {'range': [0, 10], 'color': "#2ECC71"},
+                    {'range': [10, 18], 'color': "#F1C40F"},
+                    {'range': [18, 30], 'color': "#E74C3C"}
+                ],
+            }
         ))
-        fig_gauge.update_layout(height=250)
-        st.plotly_chart(fig_gauge, use_container_width=True)
+@@ -141,8 +150,7 @@
     with col_area:
+        st.subheader("📈 Tendência de Vendas (Acumulado)")
+
+        # 2. AREA CHART (Gráfico de Área com Gradiente)
+        # Mais elegante que a linha simples
+        # AREA CHART
         df['mes_dt'] = df['data_compra'].dt.to_period('M').astype(str)
-        df_temp = df.groupby('mes_dt')['order_id'].nunique().reset_index()
-        fig_area = px.area(df_temp, x='mes_dt', y='order_id', title="Volume Mensal", template="plotly_white")
-        fig_area.update_traces(line_color='#0E6251')
+        df_temporal = df.groupby('mes_dt')['order_id'].nunique().reset_index()
+
+@@ -154,7 +162,7 @@
+            labels={'mes_dt': 'Mês', 'order_id': 'Pedidos'},
+            template="plotly_white"
+        )
+        fig_area.update_traces(line_color='#0E6251', fillcolor='rgba(14, 98, 81, 0.3)') # Verde Petróleo Transparente
+        fig_area.update_traces(line_color='#0E6251', fillcolor='rgba(14, 98, 81, 0.3)')
         st.plotly_chart(fig_area, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("#### 🆕 Novas Análises de Logística")
+@@ -165,45 +173,40 @@
+    with col_mapa:
+        st.subheader("🇧🇷 Mapa de Calor de Vendas (Brasil)")
 
-    col_new1, col_new2 = st.columns(2)
-    with col_new1:
-        st.subheader("🔥 Mapa de Calor: Hora x Dia")
-        df_heat = df.groupby(['dia_semana_pt', 'hora_compra'])['order_id'].nunique().reset_index()
-        dias_ordem = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
-        fig_heat = px.density_heatmap(
-            df_heat, x='hora_compra', y='dia_semana_pt', z='order_id',
-            category_orders={'dia_semana_pt': dias_ordem},
-            title="Concentração de Vendas (Heatmap)",
-            labels={'hora_compra': 'Hora do Dia', 'dia_semana_pt': 'Dia', 'order_id': 'Volume'},
-            color_continuous_scale='Viridis', template="plotly_white"
-        )
-        st.plotly_chart(fig_heat, use_container_width=True)
-        
-    with col_new2:
-        st.subheader("🚚 Custo de Frete por Região")
-        df_frete = df.groupby('regiao')['frete'].mean().reset_index().sort_values('frete')
-        fig_frete = px.bar(
-            df_frete, x='frete', y='regiao', orientation='h',
-            title="Frete Médio por Região (R$)", text_auto='.2f',
-            template="plotly_white", color='frete', color_continuous_scale='Reds'
-        )
-        st.plotly_chart(fig_frete, use_container_width=True)
-
-    st.markdown("---")
-    col_map, col_lol = st.columns([3, 2])
-    with col_map:
-        st.info("💡 Dica: Para ver o mapa geográfico detalhado, carregue o GeoJSON. Exibindo mapa simplificado.")
+        # 3. CHOROPLETH MAP (Mapa Coroplético)
+        # Agrupando por Estado (Sigla)
+        # CHOROPLETH MAP
         df_mapa = df.groupby('estado_cliente')['order_id'].nunique().reset_index()
-        fig_map = px.choropleth(df_mapa, locations='estado_cliente', locationmode="country names", color='order_id', scope="south america", title="Mapa de Vendas (Simulado)")
-        st.plotly_chart(fig_map, use_container_width=True)
-    with col_lol:
-        df_top10 = df_mapa.sort_values('order_id').tail(10)
-        fig_lol = px.scatter(df_top10, x='order_id', y='estado_cliente', title="Top 10 Estados (Lollipop)", size='order_id', color='order_id')
-        st.plotly_chart(fig_lol, use_container_width=True)
+
+        if brazil_geo:
+            fig_map = px.choropleth(
+                df_mapa,
+                geojson=brazil_geo,
+                locations='estado_cliente', # Coluna com sigla 'SP', 'RJ'
+                featureidkey='properties.sigla', # Onde está a sigla no GeoJSON
+                locations='estado_cliente',
+                featureidkey='properties.sigla',
+                color='order_id',
+                color_continuous_scale='Blues', # Gradiente Azul
+                color_continuous_scale='Blues',
+                title="Intensidade de Vendas por Estado",
+                template="plotly_white"
+            )
+            fig_map.update_geos(fitbounds="locations", visible=False) # Foca no Brasil e remove o resto do mundo
+            fig_map.update_geos(fitbounds="locations", visible=False)
+            fig_map.update_layout(height=500, margin={"r":0,"t":30,"l":0,"b":0})
+            st.plotly_chart(fig_map, use_container_width=True)
+        else:
+            st.warning("Não foi possível carregar o mapa. Verifique sua conexão.")
+
+    with col_rank:
+        st.subheader("🏆 Top 10 Estados (Lollipop Chart)")
+        st.subheader("🏆 Top 10 Estados")
+
+        # 4. LOLLIPOP CHART (Gráfico de Pirulito)
+        # Muito mais limpo que barras para rankings
+        # LOLLIPOP CHART
+        df_top10 = df_mapa.sort_values(by='order_id', ascending=True).tail(10)
+
+        fig_lolly = go.Figure()
+        
+        # Desenha a linha (o "palito")
+        fig_lolly.add_trace(go.Scatter(
+            x=df_top10['order_id'],
+            y=df_top10['estado_cliente'],
+            mode='markers',
+            marker=dict(color='#D35400', size=12) # Laranja Queimado
+            marker=dict(color='#D35400', size=12)
+        ))
+
+        # Desenha as linhas horizontais para conectar
+        for i in range(len(df_top10)):
+            fig_lolly.add_shape(
+                type='line',
+@@ -219,13 +222,13 @@
+            height=500
+        )
+        st.plotly_chart(fig_lolly, use_container_width=True)
 
 # ==============================================================================
-# ABA P2: PREÇO E CATEGORIAS
+# ABA 2: PERGUNTA 2 (Preço e Categorias) - GESTÃO DE PORTFÓLIO
+# ABA 2: PERGUNTA 2 (Preço e Categorias)
 # ==============================================================================
 with tab_p2:
-    st.markdown("### 🏷️ P2: Portfólio e Precificação")
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Ticket Médio", f"R$ {df['preco'].mean():.2f}")
-    c2.metric("Top Categoria", df['categoria'].mode()[0])
-    c3.metric("Faturamento", f"R$ {df['preco'].sum():,.0f}")
-    
+    st.markdown("### 🏷️ P2: Análise de Preço e Mix de Produtos")
+
+    # KPIs de Produto
+    col1, col2, col3 = st.columns(3)
+    ticket_medio = df['preco'].mean()
+    categoria_top = df['categoria'].mode()[0]
+@@ -237,199 +240,137 @@
+
     st.markdown("---")
+
+    # --- LINHA 1: PARETO (O GRÁFICO REI DA GESTÃO) ---
+    st.subheader("📊 Curva ABC (Pareto) de Faturamento por Categoria")
+    st.caption("Identificando as poucas categorias que geram a maior parte da receita (Regra 80/20).")
+    st.subheader("📊 Curva ABC (Pareto) de Faturamento")
+
+    # 1. Preparação dos dados para Pareto
+    # PARETO
+    df_pareto = df.groupby('categoria')['preco'].sum().reset_index()
+    df_pareto = df_pareto.sort_values(by='preco', ascending=False)
+
+    # Cálculo do Acumulado
+    df_pareto['acumulado'] = df_pareto['preco'].cumsum()
+    df_pareto['percentual_acumulado'] = (df_pareto['acumulado'] / df_pareto['preco'].sum()) * 100
+
+    # Pegamos apenas as Top 20 categorias para o gráfico não ficar ilegível
+    df_pareto_top = df_pareto.head(20)
+
+    # 2. Construção do Gráfico Combo (Barras + Linha)
+    fig_pareto = go.Figure()
     
-    st.subheader("📊 Pareto (Curva ABC)")
-    df_par = df.groupby('categoria')['preco'].sum().sort_values(ascending=False).head(20).reset_index()
-    fig_par = px.bar(df_par, x='categoria', y='preco', title="Top 20 Categorias (Receita)", template="plotly_white")
-    st.plotly_chart(fig_par, use_container_width=True)
+    # Barras (Faturamento)
+    fig_pareto.add_trace(go.Bar(
+        x=df_pareto_top['categoria'],
+        y=df_pareto_top['preco'],
+        name='Faturamento (R$)',
+        marker_color='#154360' # Azul Escuro
+        x=df_pareto_top['categoria'], y=df_pareto_top['preco'],
+        name='Faturamento (R$)', marker_color='#154360'
+    ))
     
-    st.markdown("#### 🆕 Análises de Preço Aprofundadas")
-    
-    col_new3, col_new4 = st.columns(2)
-    with col_new3:
-        st.subheader("📦 Dispersão de Preços (Boxplot)")
-        top_10_cats = df['categoria'].value_counts().head(10).index
-        df_box_cat = df[df['categoria'].isin(top_10_cats)]
-        fig_box_cat = px.box(df_box_cat, x='categoria', y='preco', title="Distribuição de Preços nas Top 10 Categorias", points=False, template="plotly_white", color='categoria')
-        fig_box_cat.update_layout(showlegend=False, yaxis_range=[0, 500])
-        st.plotly_chart(fig_box_cat, use_container_width=True)
+    # Linha (% Acumulado)
+    fig_pareto.add_trace(go.Scatter(
+        x=df_pareto_top['categoria'],
+        y=df_pareto_top['percentual_acumulado'],
+        name='% Acumulado',
+        yaxis='y2', # Eixo secundário
+        mode='lines+markers',
+        marker=dict(color='#D35400') # Laranja
+        x=df_pareto_top['categoria'], y=df_pareto_top['percentual_acumulado'],
+        name='% Acumulado', yaxis='y2', mode='lines+markers', marker=dict(color='#D35400')
+    ))
+
+    # Layout de dois eixos
+    fig_pareto.update_layout(
+        title="Top 20 Categorias: Faturamento vs. Acumulado",
+        yaxis=dict(title="Faturamento (R$)"),
+        yaxis2=dict(
+            title="% Acumulado",
+            overlaying='y',
+            side='right',
+            range=[0, 110]
+        ),
+        template="plotly_white",
+        legend=dict(x=0.5, y=1.1, orientation='h')
+        yaxis2=dict(title="% Acumulado", overlaying='y', side='right', range=[0, 110]),
+        template="plotly_white", legend=dict(x=0.5, y=1.1, orientation='h')
+    )
+    st.plotly_chart(fig_pareto, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- LINHA 2: ELASTICIDADE E COMPOSIÇÃO ---
+    col_scatter, col_sun = st.columns([2, 1])
+
+    with col_scatter:
+        st.subheader("📉 Relação Preço vs. Volume (Elasticidade)")
+        st.caption("Cada bolha é uma categoria. Bolhas maiores faturam mais.")
+        st.subheader("📉 Relação Preço vs. Volume")
+
+        # Agrupando: Preço Médio vs Quantidade de Vendas
+        # SCATTER
+        df_elasticidade = df.groupby('categoria').agg(
+            preco_medio=('preco', 'mean'),
+            qtd_vendas=('order_id', 'nunique'),
+            faturamento=('preco', 'sum')
+        ).reset_index()
+
+        # Removendo outliers extremos para visualizar melhor (opcional)
+        df_elasticidade = df_elasticidade[df_elasticidade['preco_medio'] < 2000]
+
+        fig_scatter = px.scatter(
+            df_elasticidade,
+            x='preco_medio',
+            y='qtd_vendas',
+            size='faturamento', # Tamanho da bolha
+            color='qtd_vendas',
+            hover_name='categoria',
+            df_elasticidade, x='preco_medio', y='qtd_vendas',
+            size='faturamento', color='qtd_vendas', hover_name='categoria',
+            title="Produtos mais caros vendem menos?",
+            labels={'preco_medio': 'Preço Médio (R$)', 'qtd_vendas': 'Qtd. Vendas'},
+            template="plotly_white",
+            color_continuous_scale='Viridis'
+            template="plotly_white", color_continuous_scale='Viridis'
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+
+    with col_sun:
+        st.subheader("☀️ Sunburst de Categorias")
+
+        # Selecionando Top 15 para o Sunburst ficar bonito
+        # SUNBURST
+        df_sun = df_pareto.head(15)
         
-    with col_new4:
-        st.subheader("💸 Preço do Produto vs. Frete")
-        df_samp = df.sample(min(2000, len(df)))
-        fig_scat_frete = px.scatter(df_samp, x='preco', y='frete', title="Correlação: Preço x Frete", trendline="ols", template="plotly_white", opacity=0.6)
-        st.plotly_chart(fig_scat_frete, use_container_width=True)
+        fig_sun = px.sunburst(
+            df_sun,
+            path=['categoria'],
+            values='preco',
+            df_sun, path=['categoria'], values='preco',
+            title="Share de Faturamento (Top 15)",
+            color_discrete_sequence=px.colors.qualitative.Prism
+        )
+        st.plotly_chart(fig_sun, use_container_width=True)
 
 # ==============================================================================
-# ABA P3: SATISFAÇÃO
+# ABA 3: PERGUNTA 3 (Satisfação e Logística) - A VOZ DO CLIENTE
+# ABA 3: PERGUNTA 3 (Satisfação)
 # ==============================================================================
 with tab_p3:
-    st.markdown("### ⭐ P3: Experiência do Cliente")
+    st.markdown("### ⭐ P3: Impacto da Logística na Satisfação (NPS/Reviews)")
+    st.markdown("### ⭐ P3: Impacto da Logística na Satisfação")
+
+    # KPIs de Satisfação
+    col1, col2, col3 = st.columns(3)
     
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Nota Média", f"{df['review_score'].mean():.2f}/5")
-    k2.metric("Atrasos", df[df['atraso_entrega']>0].shape[0])
-    k3.metric("% Atraso", f"{(df[df['atraso_entrega']>0].shape[0]/len(df))*100:.1f}%")
-    
-    st.markdown("---")
-    st.markdown("#### 🆕 Análise de Felicidade do Cliente")
-    
-    col_new5, col_new6 = st.columns(2)
-    with col_new5:
-        st.subheader("🗺️ Satisfação por Região")
-        df_score_reg = df.groupby('regiao')['review_score'].mean().reset_index().sort_values('review_score')
-        fig_score_reg = px.bar(df_score_reg, x='review_score', y='regiao', orientation='h', title="Nota Média por Região", range_x=[3, 5], template="plotly_white", color='review_score', color_continuous_scale='Bluyl')
-        st.plotly_chart(fig_score_reg, use_container_width=True)
-        
-    with col_new6:
-        st.subheader("📉 Impacto do Frete na Nota")
-        fig_box_frete = px.box(df, x='review_score', y='frete', title="Distribuição do Valor de Frete por Nota", template="plotly_white", color='review_score')
-        fig_box_frete.update_yaxes(range=[0, 100])
-        st.plotly_chart(fig_box_frete, use_container_width=True)
+    avg_score = df['review_score'].mean()
+    qtd_atrasos = df[df['atraso_entrega'] > 0].shape[0]
+    perc_atrasos = (qtd_atrasos / df.shape[0]) * 100
+
+    col1.metric("Nota Média (1-5)", f"{avg_score:.2f} ⭐")
+    col2.metric("Pedidos com Atraso", f"{qtd_atrasos:,}".replace(',', '.'))
+    col3.metric("Taxa de Atraso", f"{perc_atrasos:.1f}%", delta_color="inverse") # Vermelho se alto
+    col3.metric("Taxa de Atraso", f"{perc_atrasos:.1f}%", delta_color="inverse")
 
     st.markdown("---")
-    c_hist, c_line = st.columns(2)
-    with c_hist:
-        fig_h = px.histogram(df, x='review_score', title="Histograma de Notas", nbins=5)
-        st.plotly_chart(fig_h, use_container_width=True)
-    with c_line:
-        df_corr = df[df['tempo_total']<=50].groupby('tempo_total')['review_score'].mean().reset_index()
-        fig_c = px.line(df_corr, x='tempo_total', y='review_score', title="Queda da Nota com o Tempo")
-        st.plotly_chart(fig_c, use_container_width=True)
+
+    # --- LINHA 1: DISTRIBUIÇÃO E CORRELAÇÃO ---
+    col_hist, col_corr = st.columns(2)
+
+    with col_hist:
+        st.subheader("📊 Distribuição das Notas")
+        st.caption("Volume de avaliações por quantidade de estrelas.")
+
+        # Contagem de notas
+        df_notas = df['review_score'].value_counts().reset_index()
+        df_notas.columns = ['Nota', 'Quantidade']
+        df_notas = df_notas.sort_values('Nota')
+
+        # Cores semafóricas (Vermelho -> Verde)
+        cores_notas = {1: '#E74C3C', 2: '#E67E22', 3: '#F1C40F', 4: '#3498DB', 5: '#2ECC71'}
+
+        fig_hist = px.bar(
+            df_notas, 
+            x='Nota', 
+            y='Quantidade',
+            text_auto=True,
+            title="Histograma de Avaliações",
+            template="plotly_white"
+            df_notas, x='Nota', y='Quantidade', text_auto=True,
+            title="Histograma de Avaliações", template="plotly_white"
+        )
+        # Aplicando as cores manualmente para dar impacto
+        fig_hist.update_traces(marker_color=[cores_notas[n] for n in df_notas['Nota']])
+        fig_hist.update_traces(marker_color=[cores_notas.get(n, '#333') for n in df_notas['Nota']])
+        fig_hist.update_layout(xaxis=dict(tickmode='linear'))
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+    with col_corr:
+        st.subheader("📉 Atraso vs. Satisfação (Prova Real)")
+        st.caption("Como a nota média cai conforme o tempo de entrega aumenta?")
+        st.subheader("📉 Atraso vs. Satisfação")
+
+        # Agrupando por dias de entrega (limitando a 50 dias para tirar outliers extremos do gráfico)
+        df_corr = df[df['tempo_total'] <= 50].groupby('tempo_total')['review_score'].mean().reset_index()
+
+        fig_corr = px.line(
+            df_corr, 
+            x='tempo_total', 
+            y='review_score',
+            markers=True,
+            df_corr, x='tempo_total', y='review_score', markers=True,
+            title="Correlação: Tempo de Entrega x Nota Média",
+            labels={'tempo_total': 'Dias para Entregar', 'review_score': 'Nota Média'},
+            template="plotly_white"
+        )
+        # Adiciona uma linha de tendência vermelha para dramatizar a queda
+        fig_corr.add_scatter(
+            x=df_corr['tempo_total'], 
+            y=df_corr['review_score'], 
+            mode='lines', 
+            line=dict(color='red', width=2, dash='dot'),
+            name='Tendência'
+            x=df_corr['tempo_total'], y=df_corr['review_score'], 
+            mode='lines', line=dict(color='red', width=2, dash='dot'), name='Tendência'
+        )
+        
+        st.plotly_chart(fig_corr, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- LINHA 2: QUALIDADE POR CATEGORIA ---
+    st.subheader("🏆 Qualidade Percebida por Categoria (Top 15)")
+    st.caption("Quais categorias recebem mais 5 estrelas proporcionalmente?")
+
+    # Selecionando Top 15 categorias por volume
+    top_cats = df['categoria'].value_counts().head(15).index
+    df_top_cats = df[df['categoria'].isin(top_cats)]
+
+    # Tabela cruzada: Categoria nas linhas, Nota nas colunas (normalizado %)
+    df_qualidade = pd.crosstab(df_top_cats['categoria'], df_top_cats['review_score'], normalize='index') * 100
+    df_qualidade = df_qualidade.reset_index()
+
+    # Gráfico de Barras Empilhadas 100%
+    fig_stack = px.bar(
+        df_qualidade, 
+        x=[1, 2, 3, 4, 5], 
+        y='categoria', 
+        orientation='h',
+        df_qualidade, x=[1, 2, 3, 4, 5], y='categoria', orientation='h',
+        title="Composição das Notas por Categoria (%)",
+        labels={'value': '% do Total', 'categoria': 'Categoria', 'variable': 'Nota'},
+        template="plotly_white",
+@@ -439,29 +380,21 @@
+    st.plotly_chart(fig_stack, use_container_width=True)
 
 # ==============================================================================
-# ABA ML: CLUSTERIZAÇÃO
+# ABA 4: MACHINE LEARNING (Clusterização) - A INTELIGÊNCIA DO DADO
+# ABA 4: MACHINE LEARNING (Clusterização)
 # ==============================================================================
 with tab_ml:
-    st.markdown("### 🤖 Clusterização (Segmentação de Clientes)")
-    
-    st.subheader("📍 Mapa dos Clusters")
-    df_samp = df.sample(min(3000, len(df)))
-    fig_clus = px.scatter(df_samp, x='tempo_total', y='preco', color='grupos', title="Clusters: Preço x Tempo", height=400)
-    fig_clus.update_layout(xaxis_range=[0,60], yaxis_range=[0,1000])
-    st.plotly_chart(fig_clus, use_container_width=True)
-    
-    st.markdown("#### 🆕 Perfilamento dos Grupos")
-    
-    col_new7, col_new8 = st.columns(2)
-    with col_new7:
-        st.subheader("👥 Tamanho dos Grupos")
-        df_count_cl = df['grupos'].value_counts().reset_index()
-        df_count_cl.columns = ['Grupo', 'Quantidade']
-        fig_count_cl = px.bar(df_count_cl, x='Grupo', y='Quantidade', title="Volume de Clientes por Cluster", template="plotly_white", color='Grupo', text_auto=True)
-        st.plotly_chart(fig_count_cl, use_container_width=True)
-        
-    with col_new8:
-        st.subheader("⭐ Satisfação por Grupo")
-        fig_box_cl = px.box(df, x='grupos', y='review_score', title="Distribuição de Notas por Cluster", template="plotly_white", color='grupos')
-        st.plotly_chart(fig_box_cl, use_container_width=True)
+    st.markdown("### 🤖 P4: Segmentação de Clientes (K-Means)")
+    st.markdown("""
+    O algoritmo agrupou os pedidos em 4 perfis comportamentais baseados em **Preço** e **Tempo de Entrega**.
+    Abaixo, visualizamos as características de cada "Tribo" de clientes.
+    """)
+    st.markdown("---")
+
+    # --- LINHA 1: VISÃO ESPACIAL (SCATTER) ---
+    st.subheader("📍 Mapa dos Clusters (Preço vs. Tempo)")
+    st.caption("Cada ponto é um pedido. Observe como o algoritmo separou os grupos.")
+
+    # Amostra de dados para o gráfico não ficar pesado
+    df_sample = df.sample(n=min(5000, df.shape[0]), random_state=42)
+
+    # ATENÇÃO: Usando coluna 'grupos' conforme seu arquivo processado
+    fig_cluster = px.scatter(
+        df_sample, 
+        x='tempo_total', 
+        y='preco', 
+        color='grupos',  # <--- CORRIGIDO: Agora usa 'grupos'
+        symbol='grupos', # <--- CORRIGIDO: Agora usa 'grupos'
+        df_sample, x='tempo_total', y='preco', 
+        color='grupos', symbol='grupos',
+        title="Dispersão dos Pedidos Identificados pelo K-Means",
+        labels={'tempo_total': 'Dias de Entrega', 'preco': 'Valor do Pedido (R$)'},
+        template="plotly_white",
+@@ -473,17 +406,15 @@
 
     st.markdown("---")
-    st.subheader("📝 Tabela Resumo")
-    
-    # Cálculo seguro da tabela
-    df_stats = df.groupby('grupos')[['preco', 'tempo_total', 'frete', 'review_score']].mean()
-    st.dataframe(df_stats.style.format("{:.2f}"))
-q
+
+    # --- LINHA 2: PERFIL DOS GRUPOS (RADAR CHART) ---
+    # --- LINHA 2: PERFIL DOS GRUPOS (RADAR) ---
+    col_radar, col_stat = st.columns([1, 1])
+
+    with col_radar:
+        st.subheader("🕸️ Personalidade dos Clusters (Radar)")
+        st.caption("Comparativo das médias normalizadas (0 a 1).")
+
+        # CORRIGIDO: Agrupando por 'grupos'
+        # Agrupando por 'grupos'
+        df_medias = df.groupby('grupos')[['preco', 'tempo_total', 'frete']].mean()
+
+        # Normalização Min-Max para o Radar
+        df_norm = (df_medias - df_medias.min()) / (df_medias.max() - df_medias.min())
+        df_norm = df_norm.reset_index()
+
+@@ -493,39 +424,30 @@
+        for i, row in df_norm.iterrows():
+            fig_radar.add_trace(go.Scatterpolar(
+                r=[row['preco'], row['tempo_total'], row['frete']],
+                theta=categorias,
+                fill='toself',
+                name=row['grupos'] # <--- CORRIGIDO
+                theta=categorias, fill='toself', name=row['grupos']
+            ))
+
+        fig_radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            showlegend=True,
+            height=400,
+            template="plotly_white"
+            showlegend=True, height=400, template="plotly_white"
+        )
+        st.plotly_chart(fig_radar, use_container_width=True)
+
+    with col_stat:
+        st.subheader("📝 Estatísticas Reais por Grupo")
+        st.caption("Valores médios reais.")
+
+        # 1. CÁLCULO NOS DADOS BRUTOS
+        # CORRIGIDO: Agrupando por 'grupos'
+        # Cálculo nos dados brutos
+        df_stats = df.groupby('grupos')[['preco', 'tempo_total', 'frete']].mean()
+
+        # Descobrimos quem é o "Grupo Rico"
+        # Grupo Rico (Maior preço)
+        grupo_rico = df_stats['preco'].idxmax()
+
+        # 2. FORMATAÇÃO PARA VISUALIZAÇÃO
+        # Formatação
+        tabela_visual = df_stats.reset_index()
+        tabela_visual.columns = ['Cluster (Perfil)', 'Ticket Médio', 'Tempo Médio', 'Frete Médio']
+        
+        tabela_visual['Ticket Médio'] = tabela_visual['Ticket Médio'].apply(lambda x: f"R$ {x:.2f}")
+        tabela_visual['Tempo Médio'] = tabela_visual['Tempo Médio'].apply(lambda x: f"{x:.1f} dias")
+        tabela_visual['Frete Médio'] = tabela_visual['Frete Médio'].apply(lambda x: f"R$ {x:.2f}")
+
+        st.table(tabela_visual)
+        
+
+        st.success(f"💡 Insight: O grupo **{grupo_rico}** é o que traz maior receita unitária.")
